@@ -28,7 +28,7 @@
   },
   "scripts": {
     "test": "mocha -w --compilers js:babel-core/register --reporter spec ./src/test/tests.js",
-    "compile": "babel -d lib/ src/",
+    "compile": "babel -d lib/ src/index.js",
     "prepublish": "npm run compile"
   },
   "repository": {
