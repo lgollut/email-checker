@@ -1,100 +1,193 @@
-import net from 'net';
+import { Socket } from 'net';
 import { SmtpQueriesError } from './errors';
 
-export default function smtpQueries(email, options = {}) {
-  return new Promise((resolve, reject) => {
-    const { port, smtp, timeout, fqdn, sender, ignore } = options;
-    const socket = net.createConnection(port, smtp);
+export default class SmtpQueries {
+  constructor(options) {
+    const { port, smtp, timeout, fqdn, sender, mxServers } = options;
 
-    let stage = 0;
-    let success = false;
-    let response = '';
-    let completed = false;
-    let ended = false;
-    let tryagain = false;
+    this.port = port;
+    this.smtp = smtp;
+    this.fqdn = fqdn;
+    this.sender = sender;
+    this.timeout = timeout;
+    this.mxServers = mxServers;
+    this.email = '';
 
-    function advanceToNextStage() {
-      stage += 1;
-      response = '';
-    }
+    this.currentMx = 0;
+    this.stage = 0;
+    this.success = false;
+    this.response = '';
+    this.currentMsg = '';
+    this.currentCmd = 'conn';
+    this.currentCode = 0;
 
-    function writeToSocket(cmd) {
-      if (!ended) {
-        socket.write(cmd, advanceToNextStage);
-      }
-    }
+    this.socket = new Socket();
 
-    if (timeout > 0) {
-      socket.setTimeout(timeout, () => {
-        ended = true;
-        socket.destroy('Connection Timed Out');
+    if (this.timeout > 0) {
+      this.socket.setTimeout(this.timeout, () => {
+        this.socket.destroy('Connection Timed Out');
       });
     }
+  }
 
-    socket.on('data', (data) => {
-      response += data.toString();
-      completed = response.slice(-1) === '\n';
+  getSocket = () => this.socket;
 
-      if (completed) {
-        switch (stage) {
-          case 0: {
-            if (response.indexOf('220') !== -1 && !ended) {
-              writeToSocket(`EHLO ${fqdn}\r\n`);
-            } else {
-              if (
-                response.indexOf('421') !== -1 ||
-                response.indexOf('450') !== -1 ||
-                response.indexOf('451') !== -1
-              ) {
-                tryagain = true;
-              }
-              socket.end();
-            }
-            break;
-          }
-          case 1: {
-            if (response.indexOf('250') > -1 && !ended) {
-              writeToSocket(`MAIL FROM:<${sender}>\r\n`);
-            } else {
-              socket.end();
-            }
-            break;
-          }
-          case 2: {
-            if (response.indexOf('250') > -1 && !ended) {
-              writeToSocket(`RCPT TO:<${email}>\r\n`);
-            } else {
-              socket.end();
-            }
-            break;
-          }
-          case 3: {
-            if (
-              response.indexOf('250') > -1 ||
-              (ignore && response.indexOf(ignore) > -1)
-            ) {
-              success = true;
-            }
-            writeToSocket('QUIT\r\n');
-            break;
-          }
-          case 4:
-          default: {
-            socket.end();
-          }
-        }
+  writeToSocket = (cmd, args, { resCode, resMsg, errorMsg } = {}) => {
+    if (this.socket.destroyed) {
+      return;
+    }
+
+    this.currentCode = resCode;
+    this.currentMsg = resMsg;
+
+    if (cmd === 'quit') {
+      if (resMsg) {
+        this.socket.write(`${cmd}\r\n`);
+        this.softBounce = resMsg;
+        this.socket.end();
+      } else if (errorMsg) {
+        this.socket.write(`${cmd}\r\n`);
+        this.socket.destroy(errorMsg);
+      } else {
+        this.socket.write(`${cmd}\r\n`);
+      }
+    } else {
+      this.currentCmd = cmd;
+      this.socket.write(`${cmd} ${args}\r\n`, () => {
+        this.response = '';
+      });
+    }
+  }
+
+  getHost = () => {
+    const server = this.mxServers[this.currentMx];
+    this.currentMx += 1;
+    return server;
+  }
+
+  stageResponse = (resCode, resMsg) => {
+    const stage = ''.concat(this.currentCmd.charAt(0).toUpperCase(), this.currentCmd.slice(1));
+    this[`handle${stage}Res`].call(this, resCode, resMsg);
+  }
+
+  handleConnRes = (resCode, resMsg) => {
+    if ( // Success
+      resCode === 220     // Service ready
+    ) {
+      this.writeToSocket('ehlo', this.fqdn, { resCode, resMsg });
+    } else if ( // Soft bounce
+      resCode === 421     // Service not available
+    ) {
+      this.writeToSocket('quit', null, { resCode, resMsg });
+    }
+  }
+
+  handleEhloRes = (resCode, resMsg) => {
+    if ( // Success
+      resCode === 250     // Requested mail action ok
+    ) {
+      this.writeToSocket('mail', `from:<${this.sender}>`, { resCode, resMsg });
+    } else if ( // Soft bounce
+      resCode === 421     // Service not available
+    ) {
+      this.writeToSocket('quit', null, { resCode, resMsg });
+    } else if ( // Hard bounce
+      resCode === 500 ||  // Syntax error, command unrecognized
+      resCode === 501 ||  // Syntax error in parameters or arguments
+      resCode === 504     // Command parameter not implemented
+    ) {
+      this.writeToSocket('quit', null, { resCode, errorMsg: resMsg });
+    }
+  }
+
+  handleMailRes = (resCode, resMsg) => {
+    if ( // Success
+      resCode === 250     // Requested mail action ok
+    ) {
+      this.writeToSocket('rcpt', `to:<${this.email}>`, { resCode, resMsg });
+    } else if ( // Soft bounce
+      resCode === 451 ||  // Action aborted: local error in processing
+      resCode === 452 ||  // Action not taken : insufficient system storage
+      resCode === 421     // Service not available
+    ) {
+      this.writeToSocket('quit', null, { resCode, resMsg });
+    } else if ( // Hard bounce
+      resCode === 500 ||  // Syntax error, command unrecognized
+      resCode === 501 ||  // Syntax error in parameters or arguments
+      resCode === 552     // Mail action aborted: exceeded storage allocation
+    ) {
+      this.writeToSocket('quit', null, { resCode, errorMsg: resMsg });
+    }
+  }
+
+  handleRcptRes = (resCode, resMsg) => {
+    if ( // Success
+      resCode === 250 ||  // Requested mail action ok
+      resCode === 251     // User not local; will forward
+    ) {
+      this.success = true;
+      this.writeToSocket('quit', null, { resCode, resMsg });
+    } else if ( // Soft bounce)
+      resCode === 450 ||  // Mailbox unavailable (busy)
+      resCode === 451 ||  // Action aborted: local error in processing
+      resCode === 452 ||  // Action not taken : insufficient system storage
+      resCode === 421     // Service not available
+    ) {
+      this.writeToSocket('quit', null, { resCode, resMsg });
+    } else if ( // Hard bounce)
+      resCode === 500 ||  // Syntax error, command unrecognized
+      resCode === 501 ||  // Syntax error in parameters or arguments
+      resCode === 503 ||  // Bad sequence of commands
+      resCode === 550 ||  // Action not taken: mailbox unavailable (not found)
+      resCode === 551 ||  // User not local
+      resCode === 552 ||  // Mail action aborted: exceeded storage allocation
+      resCode === 553     // Action not taken: mailbox name not allowed
+    ) {
+      this.writeToSocket('quit', null, { resCode, errorMsg: resMsg });
+    }
+  }
+
+  handleQuitRes = () => {
+    this.socket.end();
+  }
+
+  parseResponse = response => ({
+    resMsg: response.slice(3, -1).trim(),
+    resCode: parseInt(response.slice(0, 3), 10),
+  })
+
+  query = (email) => {
+    const { exchange } = this.getHost();
+
+    if (!exchange) {
+      return Promise.reject(new SmtpQueriesError(`Unknown server ${exchange}`));
+    }
+
+    this.email = email;
+
+    this.socket.connect({ port: this.port, host: exchange });
+    this.socket.on('data', (data) => {
+      this.response += data.toString();
+      if (this.response.slice(-1) === '\n') {
+        const { resCode, resMsg } = this.parseResponse(this.response);
+        this.stageResponse(resCode, resMsg);
       }
     });
 
-    socket.on('connect', () => {
-    });
+    return new Promise((resolve, reject) => {
+      this.socket.on('error', (message) => {
+        reject(new SmtpQueriesError(message.toString()));
+      });
 
-    socket.on('error', ({ message }) => {
-      reject(new SmtpQueriesError(message));
+      this.socket.on('end', () => {
+        resolve({
+          success: this.success,
+          address: email,
+          endMsg: this.softBounce,
+          endCmd: this.currentCmd.toUpperCase(),
+          endCode: this.currentCode,
+        });
+      });
     });
-
-    socket.on('end', () => {
-      resolve({ success, address: email, tryagain });
-    });
-  });
+  }
 }

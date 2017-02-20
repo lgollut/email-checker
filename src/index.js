@@ -1,7 +1,7 @@
 import validator from 'email-validator';
 
 import dnsResolver from './dns-resolver';
-import smtpQueries from './smtp-queries';
+import SmtpQueries from './smtp-queries';
 
 const defaultOptions = {
   port: 25,
@@ -23,9 +23,12 @@ export default function checker(email = '', options = {}) {
     };
 
     dnsResolver(email, opts)
-    .then(mxServers => smtpQueries(email, { ...opts, mxServers })
+    .then((mxServers) => {
+      const smtpQueries = new SmtpQueries({ ...opts, mxServers });
+      smtpQueries.query(email)
       .then(() => {})
-      .catch(() => {}))
+      .catch(error => reject(error));
+    })
     .catch(error => reject(error));
   });
 }
