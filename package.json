@@ -1,6 +1,6 @@
 {
   "name": "email-checker",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "A Promise based email verifier",
   "main": "lib/index.js",
   "dependencies": {
@@ -28,7 +28,7 @@
   },
   "scripts": {
     "test": "mocha -w --compilers js:babel-core/register --reporter spec ./src/test/tests.js",
-    "compile": "babel -d lib/ src/index.js",
+    "compile": "rm -rf lib && babel -d lib/ src/ --ignore src/test",
     "prepublish": "npm run compile"
   },
   "repository": {
