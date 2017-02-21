@@ -26,17 +26,80 @@ const options = {
 
 describe('email-checker', () => {
   describe('checker', () => {
-    it('Resolve with correct information if email address is ommited',
+    let server;
+
+    beforeEach((done) => {
+      server = net.createServer();
+      server.listen(3007, () => {
+        done();
+      });
+    });
+
+    afterEach((done) => {
+      if (server.listening) {
+        server.close();
+      }
+      done();
+    });
+
+    it('Resolves with correct information if email address is ommited',
       () => {
-        const expected = { valid: false, reason: 'Invalid Email Sementic', email: '' };
+        const expected = { valid: false, reason: 'Invalid Email Sementic', email: null };
         return expect(checker()).to.eventually.deep.equal(expected);
       },
     );
 
-    it('Resolve with correct information if email address is invalid',
+    it('Resolves with correct information if email address is invalid',
       () => {
         const expected = { valid: false, reason: 'Invalid Email Sementic', email: invalidEmail };
         return expect(checker(invalidEmail)).to.eventually.deep.equal(expected);
+      },
+    );
+
+    it('Resolves once every promises are resolved or rejected if an array of email is passed',
+      () => {
+        const acceptAllEmail = '00a-109f2c1da_53fad2a-a5361cc@domain.xyz';
+        server.on('connection', (socket) => {
+          socket.write('220 Service ready\n');
+          let cmd = '';
+
+          socket.on('data', (data) => {
+            cmd = ''.concat(cmd, data.toString());
+            if (cmd.slice(-1) === '\n') {
+              if (
+                cmd === 'ehlo sender.test.com\r\n' ||
+                cmd === 'mail from:<sender@test.com>\r\n' ||
+                cmd === `rcpt to:<${email}>\r\n`
+              ) {
+                cmd = '';
+                socket.write('250 Requested mail action ok\r\n');
+              }
+
+              if (cmd === `rcpt to:<${acceptAllEmail}>\r\n`) {
+                cmd = '';
+                socket.write('550 Action not taken: mailbox unavailable (not found)\r\n');
+              }
+
+              if (cmd === 'quit\r\n') {
+                cmd = '';
+                socket.write('221 Service closing transmission channel\r\n');
+              }
+            }
+          });
+        });
+
+        const expected = [
+          {
+            valid: true,
+            acceptAll: false,
+            address: email,
+            endMsg: 'Requested mail action ok',
+            endCode: 250,
+            endCmd: 'RCPT',
+          },
+          { valid: false, reason: 'Invalid Email Sementic', email: invalidEmail },
+        ];
+        return expect(checker([ email, invalidEmail ], options)).to.eventually.deep.equal(expected);
       },
     );
   });
@@ -111,6 +174,7 @@ describe('email-checker', () => {
 
   describe('SmtpQueries', () => {
     let server;
+
     beforeEach((done) => {
       server = net.createServer();
       server.listen(3007, () => {

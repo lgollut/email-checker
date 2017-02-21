@@ -9,9 +9,10 @@ const defaultOptions = {
   timeout: 10000,
   fqdn: 'mail.example.org',
   checkAcceptAll: true,
+  mxServers: null,
 };
 
-export default function checker(email = '', options = {}) {
+function prepare(email, options) {
   return new Promise((resolve, reject) => {
     if (!validator.validate(email)) {
       resolve({ valid: false, reason: 'Invalid Email Sementic', email });
@@ -36,5 +37,33 @@ export default function checker(email = '', options = {}) {
       .catch(error => reject(error));
     })
     .catch(error => reject(error));
+  });
+}
+
+export default function checker(email = null, options = {}) {
+  return new Promise((resolve) => {
+    if (Array.isArray(email)) {
+      const results = [];
+      let counter = 0;
+
+      email.forEach((address, index) => prepare(address, options)
+        .then((data) => {
+          counter += 1;
+          results[index] = data;
+          if (counter === email.length) {
+            resolve(results);
+          }
+        })
+        .catch((data) => {
+          counter += 1;
+          results[index] = data;
+          if (counter === email.length) {
+            resolve(results);
+          }
+        }),
+      );
+    } else {
+      resolve(prepare(email, options));
+    }
   });
 }

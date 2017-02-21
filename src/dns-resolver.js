@@ -1,19 +1,24 @@
 import dns from 'dns';
 import { DnsResolverError } from './errors';
 
-export function mxResolver(resolve, reject, error, mxResults) {
-  if (error || (typeof mxResults === 'undefined')) {
+export function mxResolver(resolve, reject, error, lookupResult) {
+  if (error || (typeof lookupResult === 'undefined')) {
     reject(new DnsResolverError('Error while resolving MX'));
-  } else if (mxResults && mxResults.length <= 0) {
+  } else if (lookupResult && lookupResult.length <= 0) {
     reject(new DnsResolverError('No MX Records'));
   } else {
-    mxResults.sort((a, b) => a.priority - b.priority);
-    resolve(mxResults);
+    lookupResult.sort((a, b) => a.priority - b.priority);
+    resolve(lookupResult);
   }
 }
 
-export default function dnsResolver(email, { dns: dnsOpts } = {}) {
+export default function dnsResolver(email, { dns: dnsOpts, mxServers } = {}) {
   return new Promise((resolve, reject) => {
+    if (Array.isArray(mxServers)) {
+      mxServers.sort((a, b) => a.priority - b.priority);
+      resolve(mxServers);
+    }
+
     if (dnsOpts) {
       try {
         dns.setServers(Array.concat([], dnsOpts));

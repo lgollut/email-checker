@@ -1,6 +1,6 @@
 {
-  "name": "email-checker",
-  "version": "0.0.3",
+  "name": "@lgollut/email-checker",
+  "version": "0.0.4",
   "description": "A Promise based email verifier",
   "main": "lib/index.js",
   "dependencies": {
