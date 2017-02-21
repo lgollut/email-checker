@@ -8,13 +8,14 @@ const defaultOptions = {
   sender: 'info@example.org',
   timeout: 10000,
   fqdn: 'mail.example.org',
-  ignore: null,
+  checkAcceptAll: true,
 };
 
 export default function checker(email = '', options = {}) {
   return new Promise((resolve, reject) => {
     if (!validator.validate(email)) {
-      resolve({ success: false, reason: 'Invalid Email Sementic', email });
+      resolve({ valid: false, reason: 'Invalid Email Sementic', email });
+      return;
     }
 
     const opts = {
@@ -22,11 +23,16 @@ export default function checker(email = '', options = {}) {
       ...options,
     };
 
+    if (opts.checkAcceptAll) {
+      const domain = email.split('@')[1];
+      opts.acceptAllEmail = `00a-109f2c1da_53fad2a-a5361cc@${domain}`;
+    }
+
     dnsResolver(email, opts)
     .then((mxServers) => {
       const smtpQueries = new SmtpQueries({ ...opts, mxServers });
       smtpQueries.query(email)
-      .then(() => {})
+      .then(res => resolve(res))
       .catch(error => reject(error));
     })
     .catch(error => reject(error));

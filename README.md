@@ -49,8 +49,8 @@ The default options are:
   // ip address, or array of ip addresses (as strings), to proceed the dns resolution,
   dns: [],
 
-  // set an ending response code integer to ignore, such as 450 for greylisted emails
-  ignore: null,
+  // wether or not to check for the 'Accept all' mode of the server,
+  checkAcceptAll: true,
 }
 ```
 
@@ -59,10 +59,11 @@ The default options are:
 The basic flow is as follows:
 
 1. Validate it is a valid email address with email-validator
-2. Get the domain of the email
-3. Get DNS MX records for that domain, ordered by priority
-4. Create a TCP connection to the first smtp server
-5. Send a EHLO message
-6. Send a MAIL FROM message
-7. Send a RCPT TO message
-8. If they all validate, return an object with success: true.
+1. Get the domain of the email
+1. Get DNS MX records for that domain, ordered by priority
+1. Create a TCP connection to the first smtp server
+1. Send ehlo command
+1. Send mail command
+1. Send rcpt command
+1. If acceptAll option is set, perform rcpt command again with a likely invalid address
+1. Resolve with an object containing validations results

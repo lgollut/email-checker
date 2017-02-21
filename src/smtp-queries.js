@@ -3,22 +3,25 @@ import { SmtpQueriesError } from './errors';
 
 export default class SmtpQueries {
   constructor(options) {
-    const { port, smtp, timeout, fqdn, sender, mxServers } = options;
+    const { port, timeout, fqdn, sender, mxServers, acceptAllEmail } = options;
+
+    this.emails = [];
 
     this.port = port;
-    this.smtp = smtp;
     this.fqdn = fqdn;
     this.sender = sender;
     this.timeout = timeout;
     this.mxServers = mxServers;
-    this.email = '';
+    this.acceptAllEmail = acceptAllEmail;
 
     this.currentMx = 0;
-    this.stage = 0;
-    this.success = false;
     this.response = '';
+
+    this.valid = false;
+    this.acceptAll = null;
     this.currentMsg = '';
     this.currentCmd = 'conn';
+    this.cmd = 'conn';
     this.currentCode = 0;
 
     this.socket = new Socket();
@@ -37,13 +40,19 @@ export default class SmtpQueries {
       return;
     }
 
-    this.currentCode = resCode;
-    this.currentMsg = resMsg;
+    this.cmd = cmd;
+
+    if (resCode) {
+      this.currentCode = resCode;
+    }
+
+    if (resMsg) {
+      this.currentMsg = resMsg;
+    }
 
     if (cmd === 'quit') {
       if (resMsg) {
         this.socket.write(`${cmd}\r\n`);
-        this.softBounce = resMsg;
         this.socket.end();
       } else if (errorMsg) {
         this.socket.write(`${cmd}\r\n`);
@@ -66,7 +75,7 @@ export default class SmtpQueries {
   }
 
   stageResponse = (resCode, resMsg) => {
-    const stage = ''.concat(this.currentCmd.charAt(0).toUpperCase(), this.currentCmd.slice(1));
+    const stage = ''.concat(this.cmd.charAt(0).toUpperCase(), this.cmd.slice(1));
     this[`handle${stage}Res`].call(this, resCode, resMsg);
   }
 
@@ -78,6 +87,7 @@ export default class SmtpQueries {
     } else if ( // Soft bounce
       resCode === 421     // Service not available
     ) {
+      this.valid = null;
       this.writeToSocket('quit', null, { resCode, resMsg });
     }
   }
@@ -90,12 +100,14 @@ export default class SmtpQueries {
     } else if ( // Soft bounce
       resCode === 421     // Service not available
     ) {
+      this.valid = null;
       this.writeToSocket('quit', null, { resCode, resMsg });
     } else if ( // Hard bounce
       resCode === 500 ||  // Syntax error, command unrecognized
       resCode === 501 ||  // Syntax error in parameters or arguments
       resCode === 504     // Command parameter not implemented
     ) {
+      this.valid = false;
       this.writeToSocket('quit', null, { resCode, errorMsg: resMsg });
     }
   }
@@ -110,12 +122,14 @@ export default class SmtpQueries {
       resCode === 452 ||  // Action not taken : insufficient system storage
       resCode === 421     // Service not available
     ) {
+      this.valid = null;
       this.writeToSocket('quit', null, { resCode, resMsg });
     } else if ( // Hard bounce
       resCode === 500 ||  // Syntax error, command unrecognized
       resCode === 501 ||  // Syntax error in parameters or arguments
       resCode === 552     // Mail action aborted: exceeded storage allocation
     ) {
+      this.valid = false;
       this.writeToSocket('quit', null, { resCode, errorMsg: resMsg });
     }
   }
@@ -125,15 +139,29 @@ export default class SmtpQueries {
       resCode === 250 ||  // Requested mail action ok
       resCode === 251     // User not local; will forward
     ) {
-      this.success = true;
-      this.writeToSocket('quit', null, { resCode, resMsg });
+      this.valid = true;
+      if (this.acceptAllEmail && this.acceptAll === null) {
+        this.acceptAll = false;
+        this.writeToSocket('rcpt', `to:<${this.acceptAllEmail}>`);
+      } else if (this.acceptAll === false) {
+        this.valid = 'unknown';
+        this.acceptAll = true;
+        this.writeToSocket('quit');
+      } else {
+        this.writeToSocket('quit', null, { resCode, resMsg });
+      }
     } else if ( // Soft bounce)
       resCode === 450 ||  // Mailbox unavailable (busy)
       resCode === 451 ||  // Action aborted: local error in processing
       resCode === 452 ||  // Action not taken : insufficient system storage
       resCode === 421     // Service not available
     ) {
-      this.writeToSocket('quit', null, { resCode, resMsg });
+      if (this.acceptAll === false) {
+        this.writeToSocket('quit');
+      } else {
+        this.valid = null;
+        this.writeToSocket('quit', null, { resCode, resMsg });
+      }
     } else if ( // Hard bounce)
       resCode === 500 ||  // Syntax error, command unrecognized
       resCode === 501 ||  // Syntax error in parameters or arguments
@@ -143,7 +171,12 @@ export default class SmtpQueries {
       resCode === 552 ||  // Mail action aborted: exceeded storage allocation
       resCode === 553     // Action not taken: mailbox name not allowed
     ) {
-      this.writeToSocket('quit', null, { resCode, errorMsg: resMsg });
+      if (this.acceptAll === false) {
+        this.writeToSocket('quit');
+      } else {
+        this.valid = false;
+        this.writeToSocket('quit', null, { resCode, errorMsg: resMsg });
+      }
     }
   }
 
@@ -181,11 +214,12 @@ export default class SmtpQueries {
 
       this.socket.on('end', () => {
         resolve({
-          success: this.success,
-          address: email,
-          endMsg: this.softBounce,
+          valid: this.valid,
+          address: this.email,
+          endMsg: this.currentMsg,
           endCmd: this.currentCmd.toUpperCase(),
           endCode: this.currentCode,
+          acceptAll: this.acceptAll,
         });
       });
     });

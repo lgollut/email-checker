@@ -28,14 +28,14 @@ describe('email-checker', () => {
   describe('checker', () => {
     it('Resolve with correct information if email address is ommited',
       () => {
-        const expected = { success: false, reason: 'Invalid Email Sementic', email: '' };
+        const expected = { valid: false, reason: 'Invalid Email Sementic', email: '' };
         return expect(checker()).to.eventually.deep.equal(expected);
       },
     );
 
     it('Resolve with correct information if email address is invalid',
       () => {
-        const expected = { success: false, reason: 'Invalid Email Sementic', email: invalidEmail };
+        const expected = { valid: false, reason: 'Invalid Email Sementic', email: invalidEmail };
         return expect(checker(invalidEmail)).to.eventually.deep.equal(expected);
       },
     );
@@ -145,7 +145,8 @@ describe('email-checker', () => {
           });
 
           return expect(smtpQueries.query(email)).to.eventually.deep.equal({
-            success: false,
+            valid: null,
+            acceptAll: null,
             address: email,
             endMsg: 'Service not available',
             endCode: 421,
@@ -164,7 +165,7 @@ describe('email-checker', () => {
       });
 
       afterEach((done) => {
-        smtpQueries = undefined;
+        smtpQueries = null;
         done();
       });
 
@@ -183,7 +184,8 @@ describe('email-checker', () => {
           });
 
           return expect(smtpQueries.query(email)).to.eventually.deep.equal({
-            success: false,
+            valid: null,
+            acceptAll: null,
             address: email,
             endMsg: 'Service not available',
             endCode: 421,
@@ -265,7 +267,7 @@ describe('email-checker', () => {
       });
 
       afterEach((done) => {
-        smtpQueries = undefined;
+        smtpQueries = null;
         done();
       });
 
@@ -291,7 +293,8 @@ describe('email-checker', () => {
           });
 
           return expect(smtpQueries.query(email)).to.eventually.deep.equal({
-            success: false,
+            valid: null,
+            acceptAll: null,
             address: email,
             endMsg: 'Service not available',
             endCode: 421,
@@ -322,7 +325,8 @@ describe('email-checker', () => {
           });
 
           return expect(smtpQueries.query(email)).to.eventually.deep.equal({
-            success: false,
+            valid: null,
+            acceptAll: null,
             address: email,
             endMsg: 'Action aborted: local error in processing',
             endCode: 451,
@@ -353,7 +357,8 @@ describe('email-checker', () => {
           });
 
           return expect(smtpQueries.query(email)).to.eventually.deep.equal({
-            success: false,
+            valid: null,
+            acceptAll: null,
             address: email,
             endMsg: 'Action not taken : insufficient system storage',
             endCode: 452,
@@ -447,7 +452,7 @@ describe('email-checker', () => {
       );
     });
 
-    describe('Rcpt results', () => {
+    describe('Rcpt results without acceptAll option', () => {
       let smtpQueries;
 
       beforeEach((done) => {
@@ -456,7 +461,7 @@ describe('email-checker', () => {
       });
 
       afterEach((done) => {
-        smtpQueries = undefined;
+        smtpQueries = null;
         done();
       });
 
@@ -485,7 +490,8 @@ describe('email-checker', () => {
           });
 
           return expect(smtpQueries.query(email)).to.eventually.deep.equal({
-            success: false,
+            valid: null,
+            acceptAll: null,
             address: email,
             endMsg: 'Service not available',
             endCode: 421,
@@ -519,7 +525,8 @@ describe('email-checker', () => {
           });
 
           return expect(smtpQueries.query(email)).to.eventually.deep.equal({
-            success: false,
+            valid: null,
+            acceptAll: null,
             address: email,
             endMsg: 'Mailbox unavailable (busy)',
             endCode: 450,
@@ -553,7 +560,8 @@ describe('email-checker', () => {
           });
 
           return expect(smtpQueries.query(email)).to.eventually.deep.equal({
-            success: false,
+            valid: null,
+            acceptAll: null,
             address: email,
             endMsg: 'Action aborted: local error in processing',
             endCode: 451,
@@ -587,7 +595,8 @@ describe('email-checker', () => {
           });
 
           return expect(smtpQueries.query(email)).to.eventually.deep.equal({
-            success: false,
+            valid: null,
+            acceptAll: null,
             address: email,
             endMsg: 'Action not taken : insufficient system storage',
             endCode: 452,
@@ -832,14 +841,146 @@ describe('email-checker', () => {
                 }
                 if (cmd === 'quit\r\n') {
                   cmd = '';
-                  socket.write('221 Service closing transmission channel');
+                  socket.write('221 Service closing transmission channel\r\n');
                 }
               }
             });
           });
 
           return expect(smtpQueries.query(email)).to.eventually.deep.equal({
-            success: true,
+            valid: true,
+            acceptAll: null,
+            address: email,
+            endMsg: 'Requested mail action ok',
+            endCode: 250,
+            endCmd: 'RCPT',
+          });
+        },
+      );
+    });
+    describe('Rcpt results with acceptAll option', () => {
+      let smtpQueries;
+      const acceptAllEmail = '00a-109f2c1da_53fad2a-a5361cc@domain.xyz';
+
+      beforeEach((done) => {
+        smtpQueries = new SmtpQueries({ ...options, acceptAllEmail });
+        done();
+      });
+
+      afterEach((done) => {
+        smtpQueries = null;
+        done();
+      });
+
+      it('Resolve with correct informations if command succeed, acceptAll option is set but server is not in accept all mode',
+        () => {
+          server.on('connection', (socket) => {
+            socket.write('220 Service ready\n');
+            let cmd = '';
+
+            socket.on('data', (data) => {
+              cmd = ''.concat(cmd, data.toString());
+              if (cmd.slice(-1) === '\n') {
+                if (
+                  cmd === 'ehlo sender.test.com\r\n' ||
+                  cmd === 'mail from:<sender@test.com>\r\n' ||
+                  cmd === `rcpt to:<${email}>\r\n`
+                ) {
+                  cmd = '';
+                  socket.write('250 Requested mail action ok\r\n');
+                }
+                if (cmd === `rcpt to:<${acceptAllEmail}>\r\n`) {
+                  cmd = '';
+                  socket.write('553 Action not taken: mailbox name not allowed\r\n');
+                }
+                if (cmd === 'quit\r\n') {
+                  cmd = '';
+                  socket.write('221 Service closing transmission channel\r\n');
+                }
+              }
+            });
+          });
+
+          return expect(smtpQueries.query(email)).to.eventually.deep.equal({
+            valid: true,
+            acceptAll: false,
+            address: email,
+            endMsg: 'Requested mail action ok',
+            endCode: 250,
+            endCmd: 'RCPT',
+          });
+        },
+      );
+
+      it('Resolve with correct informations if command succeed, acceptAll option is set and server responds with a soft bounce',
+        () => {
+          server.on('connection', (socket) => {
+            socket.write('220 Service ready\n');
+            let cmd = '';
+
+            socket.on('data', (data) => {
+              cmd = ''.concat(cmd, data.toString());
+              if (cmd.slice(-1) === '\n') {
+                if (
+                  cmd === 'ehlo sender.test.com\r\n' ||
+                  cmd === 'mail from:<sender@test.com>\r\n' ||
+                  cmd === `rcpt to:<${email}>\r\n`
+                ) {
+                  cmd = '';
+                  socket.write('250 Requested mail action ok\r\n');
+                }
+                if (cmd === `rcpt to:<${acceptAllEmail}>\r\n`) {
+                  cmd = '';
+                  socket.write('450 Mailbox unavailable (busy)\r\n');
+                }
+                if (cmd === 'quit\r\n') {
+                  cmd = '';
+                  socket.write('221 Service closing transmission channel\r\n');
+                }
+              }
+            });
+          });
+
+          return expect(smtpQueries.query(email)).to.eventually.deep.equal({
+            valid: true,
+            acceptAll: false,
+            address: email,
+            endMsg: 'Requested mail action ok',
+            endCode: 250,
+            endCmd: 'RCPT',
+          });
+        },
+      );
+
+      it('Resolve with correct informations if command succeed, acceptAll option is set and server is in accept all mode',
+        () => {
+          server.on('connection', (socket) => {
+            socket.write('220 Service ready\n');
+            let cmd = '';
+
+            socket.on('data', (data) => {
+              cmd = ''.concat(cmd, data.toString());
+              if (cmd.slice(-1) === '\n') {
+                if (
+                  cmd === 'ehlo sender.test.com\r\n' ||
+                  cmd === 'mail from:<sender@test.com>\r\n' ||
+                  cmd === `rcpt to:<${email}>\r\n` ||
+                  cmd === `rcpt to:<${acceptAllEmail}>\r\n`
+                ) {
+                  cmd = '';
+                  socket.write('250 Requested mail action ok\r\n');
+                }
+                if (cmd === 'quit\r\n') {
+                  cmd = '';
+                  socket.write('221 Service closing transmission channel\r\n');
+                }
+              }
+            });
+          });
+
+          return expect(smtpQueries.query(email)).to.eventually.deep.equal({
+            valid: 'unknown',
+            acceptAll: true,
             address: email,
             endMsg: 'Requested mail action ok',
             endCode: 250,
