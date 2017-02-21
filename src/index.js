@@ -2,6 +2,7 @@ import validator from 'email-validator';
 
 import dnsResolver from './dns-resolver';
 import SmtpQueries from './smtp-queries';
+import checkResults from './check-result';
 
 const defaultOptions = {
   port: 25,
@@ -15,7 +16,7 @@ const defaultOptions = {
 function prepare(email, options) {
   return new Promise((resolve, reject) => {
     if (!validator.validate(email)) {
-      resolve({ valid: false, reason: 'Invalid Email Sementic', email });
+      resolve({ endMsg: 'Invalid Email Sementic', address: email });
       return;
     }
 
@@ -49,21 +50,23 @@ export default function checker(email = null, options = {}) {
       email.forEach((address, index) => prepare(address, options)
         .then((data) => {
           counter += 1;
-          results[index] = data;
+          results[index] = checkResults(data);
           if (counter === email.length) {
             resolve(results);
           }
         })
         .catch((data) => {
           counter += 1;
-          results[index] = data;
+          results[index] = checkResults(data);
           if (counter === email.length) {
             resolve(results);
           }
         }),
       );
     } else {
-      resolve(prepare(email, options));
+      prepare(email, options)
+      .then(data => resolve(checkResults(data)))
+      .catch(data => resolve(checkResults(data)));
     }
   });
 }

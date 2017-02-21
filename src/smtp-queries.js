@@ -46,8 +46,8 @@ export default class SmtpQueries {
       this.currentCode = resCode;
     }
 
-    if (resMsg) {
-      this.currentMsg = resMsg;
+    if (resMsg || errorMsg) {
+      this.currentMsg = resMsg || errorMsg;
     }
 
     if (cmd === 'quit') {
@@ -87,7 +87,7 @@ export default class SmtpQueries {
     } else if ( // Soft bounce
       resCode === 421     // Service not available
     ) {
-      this.valid = null;
+      this.valid = false;
       this.writeToSocket('quit', null, { resCode, resMsg });
     }
   }
@@ -100,7 +100,7 @@ export default class SmtpQueries {
     } else if ( // Soft bounce
       resCode === 421     // Service not available
     ) {
-      this.valid = null;
+      this.valid = false;
       this.writeToSocket('quit', null, { resCode, resMsg });
     } else if ( // Hard bounce
       resCode === 500 ||  // Syntax error, command unrecognized
@@ -122,7 +122,7 @@ export default class SmtpQueries {
       resCode === 452 ||  // Action not taken : insufficient system storage
       resCode === 421     // Service not available
     ) {
-      this.valid = null;
+      this.valid = false;
       this.writeToSocket('quit', null, { resCode, resMsg });
     } else if ( // Hard bounce
       resCode === 500 ||  // Syntax error, command unrecognized
@@ -159,7 +159,7 @@ export default class SmtpQueries {
       if (this.acceptAll === false) {
         this.writeToSocket('quit');
       } else {
-        this.valid = null;
+        this.valid = false;
         this.writeToSocket('quit', null, { resCode, resMsg });
       }
     } else if ( // Hard bounce)
@@ -208,8 +208,13 @@ export default class SmtpQueries {
     });
 
     return new Promise((resolve, reject) => {
-      this.socket.on('error', (message) => {
-        reject(new SmtpQueriesError(message.toString()));
+      this.socket.on('error', (error) => {
+        reject(new SmtpQueriesError(
+          error.toString(),
+          this.currentCmd,
+          this.currentCode,
+          this.email,
+        ));
       });
 
       this.socket.on('end', () => {
@@ -217,7 +222,7 @@ export default class SmtpQueries {
           valid: this.valid,
           address: this.email,
           endMsg: this.currentMsg,
-          endCmd: this.currentCmd.toUpperCase(),
+          endCmd: this.currentCmd,
           endCode: this.currentCode,
           acceptAll: this.acceptAll,
         });

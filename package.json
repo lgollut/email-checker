@@ -1,6 +1,6 @@
 {
   "name": "@lgollut/email-checker",
-  "version": "0.0.5",
+  "version": "0.0.6",
   "description": "A Promise based email verifier",
   "main": "lib/index.js",
   "dependencies": {
@@ -27,7 +27,7 @@
     "url": "https://github.com/lgollut/email-checker/issues"
   },
   "scripts": {
-    "test": "mocha -w --compilers js:babel-core/register --reporter spec ./src/test/tests.js",
+    "test": "mocha -w --compilers js:babel-core/register --reporter spec ./src/test",
     "compile": "rm -rf lib && babel -d lib/ src/ --ignore src/test",
     "prepublish": "npm run compile"
   },

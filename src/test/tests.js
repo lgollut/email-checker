@@ -8,6 +8,7 @@ import checker from '../index';
 import dnsResolver, { mxResolver } from '../dns-resolver';
 import SmtpQueries from '../smtp-queries';
 import { DnsResolverError, SmtpQueriesError } from '../errors';
+import checkResult from '../check-result';
 
 chai.use(chaiAsPromised);
 const expect = chai.expect;
@@ -42,17 +43,57 @@ describe('email-checker', () => {
       done();
     });
 
-    it('Resolves with correct information if email address is ommited',
+    it('Resolves with correct informations if email address is ommited',
       () => {
-        const expected = { valid: false, reason: 'Invalid Email Sementic', email: null };
+        const expected = checkResult({ endMsg: 'Invalid Email Sementic' });
         return expect(checker()).to.eventually.deep.equal(expected);
       },
     );
 
-    it('Resolves with correct information if email address is invalid',
+    it('Resolves with correct informations if email address is invalid',
       () => {
-        const expected = { valid: false, reason: 'Invalid Email Sementic', email: invalidEmail };
+        const expected = checkResult({ endMsg: 'Invalid Email Sementic', address: invalidEmail });
         return expect(checker(invalidEmail)).to.eventually.deep.equal(expected);
+      },
+    );
+
+    it('Resolves with correct informations if process fail somewhere',
+      () => {
+        server.on('connection', (socket) => {
+          socket.write('220 Service ready\n');
+          let cmd = '';
+
+          socket.on('data', (data) => {
+            cmd = ''.concat(cmd, data.toString());
+            if (cmd.slice(-1) === '\n') {
+              if (
+                cmd === 'ehlo sender.test.com\r\n' ||
+                cmd === 'mail from:<sender@test.com>\r\n'
+              ) {
+                cmd = '';
+                socket.write('250 Requested mail action ok\r\n');
+              }
+
+              if (cmd === `rcpt to:<${email}>\r\n`) {
+                cmd = '';
+                socket.write('550 Action not taken: mailbox unavailable (not found)\r\n');
+              }
+
+              if (cmd === 'quit\r\n') {
+                cmd = '';
+                socket.write('221 Service closing transmission channel\r\n');
+              }
+            }
+          });
+        });
+
+        return expect(checker(email, options)).to.eventually.deep.equal(checkResult({
+          valid: false,
+          address: email,
+          endMsg: 'Action not taken: mailbox unavailable (not found)',
+          endCode: 550,
+          endCmd: 'rcpt',
+        }));
       },
     );
 
@@ -89,15 +130,15 @@ describe('email-checker', () => {
         });
 
         const expected = [
-          {
+          checkResult({
             valid: true,
             acceptAll: false,
             address: email,
             endMsg: 'Requested mail action ok',
             endCode: 250,
-            endCmd: 'RCPT',
-          },
-          { valid: false, reason: 'Invalid Email Sementic', email: invalidEmail },
+            endCmd: 'rcpt',
+          }),
+          checkResult({ endMsg: 'Invalid Email Sementic', address: invalidEmail }),
         ];
         return expect(checker([ email, invalidEmail ], options)).to.eventually.deep.equal(expected);
       },
@@ -208,14 +249,12 @@ describe('email-checker', () => {
             socket.write('421 Service not available\n');
           });
 
-          return expect(smtpQueries.query(email)).to.eventually.deep.equal({
-            valid: null,
-            acceptAll: null,
+          return expect(smtpQueries.query(email)).to.eventually.deep.equal(checkResult({
             address: email,
             endMsg: 'Service not available',
             endCode: 421,
-            endCmd: 'CONN',
-          });
+            endCmd: 'conn',
+          }));
         },
       );
     });
@@ -247,14 +286,12 @@ describe('email-checker', () => {
             });
           });
 
-          return expect(smtpQueries.query(email)).to.eventually.deep.equal({
-            valid: null,
-            acceptAll: null,
+          return expect(smtpQueries.query(email)).to.eventually.deep.equal(checkResult({
             address: email,
             endMsg: 'Service not available',
             endCode: 421,
-            endCmd: 'EHLO',
-          });
+            endCmd: 'ehlo',
+          }));
         },
       );
 
@@ -356,14 +393,13 @@ describe('email-checker', () => {
             });
           });
 
-          return expect(smtpQueries.query(email)).to.eventually.deep.equal({
-            valid: null,
-            acceptAll: null,
+          return expect(smtpQueries.query(email)).to.eventually.deep.equal(checkResult({
+            valid: false,
             address: email,
             endMsg: 'Service not available',
             endCode: 421,
-            endCmd: 'MAIL',
-          });
+            endCmd: 'mail',
+          }));
         },
       );
 
@@ -388,14 +424,13 @@ describe('email-checker', () => {
             });
           });
 
-          return expect(smtpQueries.query(email)).to.eventually.deep.equal({
-            valid: null,
-            acceptAll: null,
+          return expect(smtpQueries.query(email)).to.eventually.deep.equal(checkResult({
+            valid: false,
             address: email,
             endMsg: 'Action aborted: local error in processing',
             endCode: 451,
-            endCmd: 'MAIL',
-          });
+            endCmd: 'mail',
+          }));
         },
       );
 
@@ -420,14 +455,13 @@ describe('email-checker', () => {
             });
           });
 
-          return expect(smtpQueries.query(email)).to.eventually.deep.equal({
-            valid: null,
-            acceptAll: null,
+          return expect(smtpQueries.query(email)).to.eventually.deep.equal(checkResult({
+            valid: false,
             address: email,
             endMsg: 'Action not taken : insufficient system storage',
             endCode: 452,
-            endCmd: 'MAIL',
-          });
+            endCmd: 'mail',
+          }));
         },
       );
 
@@ -553,14 +587,13 @@ describe('email-checker', () => {
             });
           });
 
-          return expect(smtpQueries.query(email)).to.eventually.deep.equal({
-            valid: null,
-            acceptAll: null,
+          return expect(smtpQueries.query(email)).to.eventually.deep.equal(checkResult({
+            valid: false,
             address: email,
             endMsg: 'Service not available',
             endCode: 421,
-            endCmd: 'RCPT',
-          });
+            endCmd: 'rcpt',
+          }));
         },
       );
 
@@ -588,14 +621,13 @@ describe('email-checker', () => {
             });
           });
 
-          return expect(smtpQueries.query(email)).to.eventually.deep.equal({
-            valid: null,
-            acceptAll: null,
+          return expect(smtpQueries.query(email)).to.eventually.deep.equal(checkResult({
+            valid: false,
             address: email,
             endMsg: 'Mailbox unavailable (busy)',
             endCode: 450,
-            endCmd: 'RCPT',
-          });
+            endCmd: 'rcpt',
+          }));
         },
       );
 
@@ -623,14 +655,13 @@ describe('email-checker', () => {
             });
           });
 
-          return expect(smtpQueries.query(email)).to.eventually.deep.equal({
-            valid: null,
-            acceptAll: null,
+          return expect(smtpQueries.query(email)).to.eventually.deep.equal(checkResult({
+            valid: false,
             address: email,
             endMsg: 'Action aborted: local error in processing',
             endCode: 451,
-            endCmd: 'RCPT',
-          });
+            endCmd: 'rcpt',
+          }));
         },
       );
 
@@ -658,14 +689,13 @@ describe('email-checker', () => {
             });
           });
 
-          return expect(smtpQueries.query(email)).to.eventually.deep.equal({
-            valid: null,
-            acceptAll: null,
+          return expect(smtpQueries.query(email)).to.eventually.deep.equal(checkResult({
+            valid: false,
             address: email,
             endMsg: 'Action not taken : insufficient system storage',
             endCode: 452,
-            endCmd: 'RCPT',
-          });
+            endCmd: 'rcpt',
+          }));
         },
       );
 
@@ -911,14 +941,14 @@ describe('email-checker', () => {
             });
           });
 
-          return expect(smtpQueries.query(email)).to.eventually.deep.equal({
+          return expect(smtpQueries.query(email)).to.eventually.deep.equal(checkResult({
             valid: true,
             acceptAll: null,
             address: email,
             endMsg: 'Requested mail action ok',
             endCode: 250,
-            endCmd: 'RCPT',
-          });
+            endCmd: 'rcpt',
+          }));
         },
       );
     });
@@ -965,14 +995,14 @@ describe('email-checker', () => {
             });
           });
 
-          return expect(smtpQueries.query(email)).to.eventually.deep.equal({
+          return expect(smtpQueries.query(email)).to.eventually.deep.equal(checkResult({
             valid: true,
             acceptAll: false,
             address: email,
             endMsg: 'Requested mail action ok',
             endCode: 250,
-            endCmd: 'RCPT',
-          });
+            endCmd: 'rcpt',
+          }));
         },
       );
 
@@ -1005,14 +1035,14 @@ describe('email-checker', () => {
             });
           });
 
-          return expect(smtpQueries.query(email)).to.eventually.deep.equal({
+          return expect(smtpQueries.query(email)).to.eventually.deep.equal(checkResult({
             valid: true,
             acceptAll: false,
             address: email,
             endMsg: 'Requested mail action ok',
             endCode: 250,
-            endCmd: 'RCPT',
-          });
+            endCmd: 'rcpt',
+          }));
         },
       );
 
@@ -1042,14 +1072,14 @@ describe('email-checker', () => {
             });
           });
 
-          return expect(smtpQueries.query(email)).to.eventually.deep.equal({
+          return expect(smtpQueries.query(email)).to.eventually.deep.equal(checkResult({
             valid: 'unknown',
             acceptAll: true,
             address: email,
             endMsg: 'Requested mail action ok',
             endCode: 250,
-            endCmd: 'RCPT',
-          });
+            endCmd: 'rcpt',
+          }));
         },
       );
     });
